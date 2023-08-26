@@ -38,7 +38,7 @@ endfunction
 
 function! vimrepress#CateComplete(findstart, base)
    if a:findstart
-      echoerr "findstart"
+      "echoerr "findstart"
       " locate the start of the word
       let line = getline('.')
       let start = col('.') - 1
@@ -47,7 +47,7 @@ function! vimrepress#CateComplete(findstart, base)
       endwhile
       return start
    else
-      echoerr "findstart-else"
+      "echoerr "findstart-else"
       " find matching items
       let res = []
       for m in split(s:completable,"|")
