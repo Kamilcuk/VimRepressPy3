@@ -399,6 +399,14 @@ class ContentStruct(object):
             else ""
         )
 
+    def get_strid(self):
+        return (
+            self.buffer_meta["strid"]
+            if self.buffer_meta is not None
+            and "title" in self.buffer_meta
+            else ""
+        )
+
     def fill_buffer(self):
 
         meta = dict(strid="", title="", slug="",
@@ -668,11 +676,11 @@ def cmdescape(txt: str):
     Wisely decides whether to wipe out the content of current buffer or open a new splited window.
 """
 def blog_wise_open_view(name: Optional[str] = None, cp: Optional[ContentStruct] = None):
-    name = name if name is not None else cp.get_title() if cp is not None else ""
+    name = name if name is not None else cp.get_title() if cp is not None else "New"
     # The filename is generally used to create a unique hash.
     file = f"/tmp/[{name}]"
     # Why using a hash? vim escaping
-    namehash = str(name.__hash__())
+    namehash = str(name.__hash__()) if cp is None else cp.get_strid()
     # Find buffer editing file above.
     buffers = vim.eval('getbufinfo({"bufloaded":1})')
     bufnr: Optional[int] = None
@@ -682,17 +690,23 @@ def blog_wise_open_view(name: Optional[str] = None, cp: Optional[ContentStruct] 
     # Switch to the existing buffer or edit a new one.
     if bufnr is not None:
         vim.command(f"buffer {bufnr}")
+        # Post need to be cleared.
+        vim.command("setl modifiable")
+        vim.command("call delete(expand('%'))")
+        # clear the buffer
+        vim.command("%delete")
     else:
         vim.command("enew")
     # Set the variables.
     vim.command(f"let b:vimrepress = {namehash}")
     vim.command('setl syntax=blogsyntax')
     vim.command('setl completefunc=vimrepress#CateComplete')
+    vim.command(f"file {cmdescape(file)}")
+    vim.command("autocmd BufLeave     <buffer> :call delete(expand('%'))")
     if cp is not None:
         # When editing post, execute BlogSave on write.
-        vim.command(f"file {cmdescape(file)}")
-        vim.command("autocmd BufWipeout   <buffer> :call delete(expand('%'))")
         vim.command("autocmd BufWritePost <buffer> :BlogSave")
+
 
 
 @vim_encoding_check
@@ -848,9 +862,7 @@ def blog_list_on_key_press(action, edit_type):
         confirm = vim_input("Confirm Delete [%s]: %s? [yes/NO]" % (id, title))
         VRP_Assert(confirm.lower() == 'yes', "Delete Aborted.", True)
 
-    vim.command("setl modifiable")
-    del vim.current.buffer[:]
-    vim.command("setl nomodified")
+    vim.command("bd")
 
     if action == "open":
         blog_edit(edit_type, int(id))
@@ -891,7 +903,7 @@ def blog_list(edit_type = "post", keep_type = False):
         VRP_Assert(first_line.find("List") != -1, "Failed to detect current list type.")
         edit_type = first_line.split()[1].lower()
 
-    blog_wise_open_view(f"[{edit_type}_list]")
+    blog_wise_open_view(f"{edit_type}_list")
     vim.current.buffer[0] = VRP_CONST.MARKER()["list_title"] % \
                                 dict(edit_type = edit_type.capitalize(), blog_url = g_data.blog_url)
 
