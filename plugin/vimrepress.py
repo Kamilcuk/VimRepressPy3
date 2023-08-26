@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from typing import Optional
 import vim
 import urllib.request, urllib.parse, urllib.error
 import xmlrpc.client
@@ -390,6 +391,14 @@ class ContentStruct(object):
         self.buffer_meta["content"] = '\n'.join(
                 vim.current.buffer[end + 1:])
 
+    def get_title(self):
+        return (
+            self.buffer_meta["title"]
+            if self.buffer_meta is not None
+            and "title" in self.buffer_meta
+            else ""
+        )
+
     def fill_buffer(self):
 
         meta = dict(strid="", title="", slug="",
@@ -644,34 +653,46 @@ def view_switch(view = "", assert_view = "", reset = False):
         return __run
     return switch
 
+def cmdescape(txt: str):
+    map = {
+        "\n": "\\n",
+        "\t": "\\t",
+        "\\": "\\\\",
+        "\"": "\\\"",
+        "[": "\\[",
+        "]": "\\]",
+    }
+    return ''.join(map.get(c, c) for c in txt)
+
 """
     Wisely decides whether to wipe out the content of current buffer or open a new splited window.
 """
-def blog_wise_open_view():
-
-    curBuf  = vim.current.buffer
-    bufname = curBuf.name
-    bEmpty  = False
-    bNoMod  = False
-
-    if( vim.eval('&modified') == '0' ):
-       bNoMod = True
-
-    if( (len(curBuf) <= 1) and (len(curBuf[0]) <= 1) ):
-       bEmpty = True
-
-    # 2016-12-05: JSTEWART: BUFFER NAME LENGTH CHECK IN ADDITION TO None CHECK
-    #                       WINDOWS WERE MULTIPLYING LIKE RABBITS SINCE
-    #                       buffer.name NEVER SEEMS TO EVALUATE TO None
-    if( ((bufname is None) or (len(bufname) == 0)) and (bNoMod or bEmpty) ):
-        vim.command('setl modifiable')
-        del vim.current.buffer[:]
-        vim.command('setl nomodified')
+def blog_wise_open_view(name: Optional[str] = None, cp: Optional[ContentStruct] = None):
+    name = name if name is not None else cp.get_title() if cp is not None else ""
+    # The filename is generally used to create a unique hash.
+    file = f"/tmp/[{name}]"
+    # Why using a hash? vim escaping
+    namehash = str(name.__hash__())
+    # Find buffer editing file above.
+    buffers = vim.eval('getbufinfo({"bufloaded":1})')
+    bufnr: Optional[int] = None
+    for buf in buffers:
+        if buf["variables"].get("vimrepress") == namehash:
+            bufnr = buf["bufnr"]
+    # Switch to the existing buffer or edit a new one.
+    if bufnr is not None:
+        vim.command(f"buffer {bufnr}")
     else:
-        vim.command(":new")
-
+        vim.command("enew")
+    # Set the variables.
+    vim.command(f"let b:vimrepress = {namehash}")
     vim.command('setl syntax=blogsyntax')
     vim.command('setl completefunc=vimrepress#CateComplete')
+    if cp is not None:
+        # When editing post, execute BlogSave on write.
+        vim.command(f"file {cmdescape(file)}")
+        vim.command("autocmd BufWipeout   <buffer> :call delete(expand('%'))")
+        vim.command("autocmd BufWritePost <buffer> :BlogSave")
 
 
 @vim_encoding_check
@@ -745,9 +766,9 @@ def blog_new(edit_type = "post", currentContent = None):
             echoerr("(CATEGORY CREATE) %s" % str(ret))
 
     else:
-        blog_wise_open_view()
         g_data.current_post = ContentStruct(edit_type = edit_type)
         cp = g_data.current_post
+        blog_wise_open_view(cp=cp)
         cp.fill_buffer()
 
 """
@@ -758,7 +779,6 @@ def blog_new(edit_type = "post", currentContent = None):
 @view_switch(view = "edit")
 def blog_edit(edit_type, post_id):
 
-    blog_wise_open_view()
     if edit_type.lower() not in ("post", "page"):
         raise VRP_Exception("Invalid option: %s " % edit_type)
     post_id = str(post_id)
@@ -767,7 +787,7 @@ def blog_edit(edit_type, post_id):
         cp = g_data.current_post = g_data.post_cache[post_id]
     else:
         cp = g_data.current_post = ContentStruct(edit_type = edit_type, post_id = post_id)
-
+    blog_wise_open_view(cp=cp)
     cp.fill_buffer()
     vim.current.window.cursor = (cp.POST_BEGIN, 0)
     vim.command('setl nomodified')
@@ -871,7 +891,7 @@ def blog_list(edit_type = "post", keep_type = False):
         VRP_Assert(first_line.find("List") != -1, "Failed to detect current list type.")
         edit_type = first_line.split()[1].lower()
 
-    blog_wise_open_view()
+    blog_wise_open_view(f"[{edit_type}_list]")
     vim.current.buffer[0] = VRP_CONST.MARKER()["list_title"] % \
                                 dict(edit_type = edit_type.capitalize(), blog_url = g_data.blog_url)
 
